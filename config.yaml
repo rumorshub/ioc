@@ -1,0 +1,13 @@
+endure:
+  grace_period: 30s
+  print_graph: false
+
+log:
+  channels:
+    endure:
+      add_source: false
+      level: info
+      encoding: json
+      output_paths:
+        - stderr
+      attributes: { }

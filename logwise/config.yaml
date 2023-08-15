@@ -1,0 +1,15 @@
+log: # config for base logger (global)
+  add_source: false
+  level: info
+  encoding: json
+  output_paths:
+    - stderr
+  attributes: { } # static attributes
+  channels:
+    foo: # name of plugin for which should create a logger
+      add_source: false
+      level: info
+      encoding: json
+      output_paths:
+        - stderr
+      attributes: { } # static attributes
