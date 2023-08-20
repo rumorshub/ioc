@@ -9,6 +9,9 @@ import (
 	"log/slog"
 	"runtime"
 	"strings"
+	"sync"
+
+	xslog "golang.org/x/exp/slog"
 
 	"github.com/fatih/color"
 	"go.uber.org/zap/zapcore"
@@ -197,6 +200,7 @@ type HandlerSyncer interface {
 
 type handlerSyncer struct {
 	slog.Handler
+	once   sync.Once
 	syncer zapcore.WriteSyncer
 }
 
@@ -208,19 +212,95 @@ func NewHandlerSyncer(syncer zapcore.WriteSyncer, handler slog.Handler) slog.Han
 }
 
 func (h *handlerSyncer) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &handlerSyncer{
-		Handler: h.Handler.WithAttrs(attrs),
-		syncer:  h.syncer,
-	}
+	return NewHandlerSyncer(h.syncer, h.Handler.WithAttrs(attrs))
 }
 
 func (h *handlerSyncer) WithGroup(name string) slog.Handler {
-	return &handlerSyncer{
-		Handler: h.Handler.WithGroup(name),
-		syncer:  h.syncer,
-	}
+	return NewHandlerSyncer(h.syncer, h.Handler.WithGroup(name))
 }
 
-func (h *handlerSyncer) Sync() error {
-	return h.syncer.Sync()
+func (h *handlerSyncer) Sync() (err error) {
+	h.once.Do(func() {
+		err = h.syncer.Sync()
+	})
+	return
+}
+
+type xHandlerWrapper struct {
+	inner slog.Handler
+}
+
+func NewXHandlerWrapper(inner slog.Handler) xslog.Handler {
+	return xHandlerWrapper{inner: inner}
+}
+
+func (h xHandlerWrapper) Enabled(ctx context.Context, lvl xslog.Level) bool {
+	return h.inner.Enabled(ctx, slog.Level(lvl))
+}
+
+func (h xHandlerWrapper) Handle(ctx context.Context, xRecord xslog.Record) error {
+	attrs := make([]slog.Attr, 0, xRecord.NumAttrs())
+	xRecord.Attrs(func(xAttr xslog.Attr) bool {
+		attrs = append(attrs, xAttrToAttr(xAttr))
+		return true
+	})
+
+	record := slog.NewRecord(xRecord.Time, slog.Level(xRecord.Level), xRecord.Message, xRecord.PC)
+	record.AddAttrs(attrs...)
+
+	return h.inner.Handle(ctx, record)
+}
+
+func (h xHandlerWrapper) WithAttrs(xAttrs []xslog.Attr) xslog.Handler {
+	attrs := make([]slog.Attr, len(xAttrs))
+	for i, xAttr := range xAttrs {
+		attrs[i] = xAttrToAttr(xAttr)
+	}
+	return NewXHandlerWrapper(h.inner.WithAttrs(attrs))
+}
+
+func (h xHandlerWrapper) WithGroup(name string) xslog.Handler {
+	return NewXHandlerWrapper(h.inner.WithGroup(name))
+}
+
+func (h xHandlerWrapper) Sync() error {
+	if s, ok := h.inner.(HandlerSyncer); ok {
+		return s.Sync()
+	}
+	return nil
+}
+
+func xAttrToAttr(a xslog.Attr) slog.Attr {
+	return slog.Attr{Key: a.Key, Value: xValueToValue(a.Value)}
+}
+
+func xValueToValue(v xslog.Value) slog.Value {
+	switch v.Kind() {
+	case xslog.KindAny:
+		return slog.AnyValue(v.Any())
+	case xslog.KindBool:
+		return slog.BoolValue(v.Bool())
+	case xslog.KindDuration:
+		return slog.DurationValue(v.Duration())
+	case xslog.KindFloat64:
+		return slog.Float64Value(v.Float64())
+	case xslog.KindInt64:
+		return slog.Int64Value(v.Int64())
+	case xslog.KindString:
+		return slog.StringValue(v.String())
+	case xslog.KindTime:
+		return slog.TimeValue(v.Time())
+	case xslog.KindUint64:
+		return slog.Uint64Value(v.Uint64())
+	case xslog.KindGroup:
+		group := make([]slog.Attr, len(v.Group()))
+		for i, a := range v.Group() {
+			group[i] = xAttrToAttr(a)
+		}
+		return slog.GroupValue(group...)
+	case xslog.KindLogValuer:
+		return xValueToValue(v.LogValuer().LogValue())
+	default:
+		return slog.AnyValue(v.Any())
+	}
 }

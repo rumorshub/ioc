@@ -5,6 +5,9 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+	xslog "golang.org/x/exp/slog"
+
 	"github.com/rumorshub/ioc/configwise"
 	"github.com/rumorshub/ioc/errs"
 )
@@ -13,6 +16,8 @@ var _ Logger = (*Log)(nil)
 
 type Logger interface {
 	NamedLogger(name string) *slog.Logger
+	NamedXLogger(name string) *xslog.Logger
+	NamedZapLogger(name string) *zap.Logger
 }
 
 type Log struct {
@@ -51,6 +56,14 @@ func (l *Log) NamedLogger(name string) *slog.Logger {
 	}
 
 	return l.base.WithGroup(name)
+}
+
+func (l *Log) NamedXLogger(name string) *xslog.Logger {
+	return xslog.New(NewXHandlerWrapper(l.NamedLogger(name).Handler()))
+}
+
+func (l *Log) NamedZapLogger(name string) *zap.Logger {
+	return NewZap(l.NamedLogger(name))
 }
 
 func (l *Log) Sync() (err error) {

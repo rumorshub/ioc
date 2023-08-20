@@ -11,7 +11,6 @@ import (
 
 	"github.com/roadrunner-server/endure/v2"
 	rrErrs "github.com/roadrunner-server/errors"
-	xSlog "golang.org/x/exp/slog"
 
 	"github.com/rumorshub/ioc/configwise"
 	"github.com/rumorshub/ioc/errs"
@@ -62,14 +61,14 @@ func (c *Container) Init() error {
 
 	opts := []endure.Options{
 		endure.GracefulShutdownTimeout(cfg.GracePeriod),
-		endure.LogHandler(xSlogHandler{inner: c.log.Handler()}),
+		endure.LogHandler(c.log.Handler()),
 	}
 
 	if cfg.PrintGraph {
 		opts = append(opts, endure.Visualize())
 	}
 
-	c.inner = endure.New(xSlog.LevelError, opts...)
+	c.inner = endure.New(slog.LevelError, opts...)
 
 	if err = c.inner.RegisterAll(c.plugins...); err != nil {
 		return rrErrs.E(op, err)
